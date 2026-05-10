@@ -1,0 +1,42 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: iot-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"    # MQTT estándar (publicación/suscripción)
+      - "9001:9001"    # MQTT sobre WebSockets (clients web/browser)
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - iot-net
+
+  nodered:
+    build:
+      context: .
+      dockerfile: Dockerfile.nodered
+    container_name: iot-nodered
+    restart: unless-stopped
+    ports:
+      - "1880:1880"    # Interfaz web de NodeRED (editor y dashboard)
+    volumes:
+      - nodered_data:/data
+    environment:
+      - TZ=America/Santiago
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+    depends_on:
+      - mosquitto
+    networks:
+      - iot-net
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+  nodered_data:
+
+networks:
+  iot-net:
+    driver: bridge
