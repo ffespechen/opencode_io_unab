@@ -29,6 +29,18 @@ services:
       - net.ipv6.conf.all.disable_ipv6=1
     depends_on:
       - mosquitto
+      - mongodb
+    networks:
+      - iot-net
+
+  mongodb:
+    image: mongo:7
+    container_name: iot-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"  # MongoDB (conexión desde NodeRED y clientes)
+    volumes:
+      - mongodb_data:/data/db
     networks:
       - iot-net
 
@@ -36,6 +48,7 @@ volumes:
   mosquitto_data:
   mosquitto_log:
   nodered_data:
+  mongodb_data:
 
 networks:
   iot-net:

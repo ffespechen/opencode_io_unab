@@ -1,18 +1,30 @@
-# Simulación IoT — NodeRED + Mosquitto MQTT
+# Simulación IoT — NodeRED + Mosquitto MQTT + MongoDB
 
-Proyecto para simular comunicaciones en Internet of Things (IoT) usando **NodeRED** como orquestador de flujos y **Eclipse Mosquitto** como broker MQTT.
+Proyecto para simular comunicaciones en Internet of Things (IoT) usando **NodeRED** como orquestador de flujos, **Eclipse Mosquitto** como broker MQTT y **MongoDB** como base de datos para persistencia de datos.
 
 ## Arquitectura
 
 ```
-┌──────────────┐       MQTT        ┌──────────────┐
-│   NodeRED    │◄──────────────►   │   Mosquitto  │
-│  (1880 web)  │   pub/sub         │  (1883 MQTT)  │
-│              │                   │  (9001 WS)    │
-└──────────────┘                   └──────────────┘
+                      ┌──────────────┐
+                      │   MongoDB    │
+                      │  (27017)     │
+                      └──────▲───────┘
+                             │
+                     writes  │  reads
+                             │
+               ┌─────────────┴──────────────┐
+               │         NodeRED            │
+               │       (1880 web)           │
+               └─────────────▲──────────────┘
+                            MQTT
+                          pub/sub
+               ┌─────────────┴──────────────┐
+               │        Mosquitto           │
+               │   (1883 MQTT / 9001 WS)    │
+               └────────────────────────────┘
 ```
 
-Ambos contenedores comparten la red `iot-net` y se comunican internamente por los nombres de servicio (`mosquitto`, `nodered`).
+Los contenedores comparten la red `iot-net` y se comunican internamente por el nombre del servicio (`mosquitto`, `nodered`, `mongodb`).
 
 ## Servicios y puertos expuestos
 
@@ -21,6 +33,7 @@ Ambos contenedores comparten la red `iot-net` y se comunican internamente por lo
 | NodeRED   | `1880` | HTTP              | Editor visual de flujos y dashboard IoT               |
 | Mosquitto | `1883` | MQTT (TCP)        | Broker MQTT estándar para pub/sub de dispositivos     |
 | Mosquitto | `9001` | MQTT over WebSock | Permite conexión MQTT desde clientes web/navegador    |
+| MongoDB   | `27017`| MongoDB wire      | Base de datos NoSQL para persistencia de datos IoT    |
 
 ## Estructura del proyecto
 
@@ -85,6 +98,7 @@ docker network create iot-net
 docker volume create mosquitto_data
 docker volume create mosquitto_log
 docker volume create nodered_data
+docker volume create mongodb_data
 
 # 3. Iniciar Mosquitto
 docker run -d \
@@ -98,7 +112,16 @@ docker run -d \
   --network iot-net \
   eclipse-mosquitto:2
 
-# 4. Iniciar NodeRED
+# 4. Iniciar MongoDB
+docker run -d \
+  --name iot-mongodb \
+  --restart unless-stopped \
+  -p 27017:27017 \
+  -v mongodb_data:/data/db \
+  --network iot-net \
+  mongo:7
+
+# 5. Iniciar NodeRED
 docker run -d \
   --name iot-nodered \
   --restart unless-stopped \
@@ -110,13 +133,17 @@ docker run -d \
   nodered/node-red:4.0.2
 ```
 
-> **Nota:** NodeRED no incluirá `node-red-dashboard` ni otros paquetes extra. Pueden instalarse desde el panel "Manage palette" dentro del editor en `http://localhost:1880`.
+> **Nota:** NodeRED no incluirá `node-red-dashboard`, `node-red-contrib-mongodb4` ni otros paquetes extra. Pueden instalarse desde el panel "Manage palette" dentro del editor en `http://localhost:1880`. Si se obtiene el error `EACCES` al instalar, ejecutar este comando para limpiar el caché npm root-owned:
+>
+> ```bash
+> docker exec -it iot-nodered sh -c "rm -rf /tmp/.npm /root/.npm && npm cache clean --force"
+> ```
 
 ### Detener y eliminar contenedores
 
 ```bash
-docker stop iot-nodered iot-mosquitto
-docker rm iot-nodered iot-mosquitto
+docker stop iot-nodered iot-mongodb iot-mosquitto
+docker rm iot-nodered iot-mongodb iot-mosquitto
 ```
 
 ## Verificar funcionamiento
@@ -141,14 +168,49 @@ Dentro del editor NodeRED:
 
 No se requiere autenticación (`allow_anonymous true`).
 
+## Conexión desde NodeRED a MongoDB
+
+Dentro del editor NodeRED:
+1. Arrastrar un nodo **mongodb in** o **mongodb out** (ya viene pre-instalado, ver sección de [Personalización](#agregar-más-nodos-a-nodered))
+2. Configurar el servidor MongoDB con:
+   - **Host**: `mongodb` (nombre del servicio en la red Docker)
+   - **Port**: `27017`
+   - **Database**: `iot` (o el nombre que se desee)
+
+No se requiere autenticación por defecto.
+
+### Verificar MongoDB desde terminal
+
+```bash
+# Acceder al shell de MongoDB
+docker exec -it iot-mongodb mongosh
+
+# Listar bases de datos
+> show dbs
+
+# Usar la base de datos IoT
+> use iot
+
+# Ver colecciones
+> show collections
+```
+
 ## Personalización
 
 ### Agregar más nodos a NodeRED
 
-Editar `Dockerfile.nodered` y agregar los paquetes npm deseados:
+#### Con Dockerfile (recomendado)
+
+Editar `Dockerfile.nodered` y agregar los paquetes npm deseados. Es importante limpiar el caché npm después de la instalación para evitar errores de permisos (`EACCES`) al usar Manage Palette dentro del editor:
 
 ```dockerfile
-RUN npm install node-red-contrib-<nombre>
+USER root
+RUN npm install \
+  node-red-contrib-<nombre1> \
+  node-red-contrib-<nombre2> && \
+  npm cache clean --force && \
+  rm -rf /root/.npm
+USER node-red
 ```
 
 Luego reconstruir:
@@ -156,6 +218,23 @@ Luego reconstruir:
 ```bash
 docker compose up -d --build nodered
 ```
+
+#### Desde Manage Palette (editor web)
+
+Si se usa la imagen base oficial (`nodered/node-red:4.0.2`) sin Dockerfile personalizado, el caché npm puede quedar con archivos root-owned y causar el error:
+
+```
+npm error code EACCES
+npm error Your cache folder contains root-owned files
+```
+
+Para solucionarlo, ejecutar en el contenedor:
+
+```bash
+docker exec -it iot-nodered sh -c "rm -rf /tmp/.npm /root/.npm && npm cache clean --force"
+```
+
+> **Nota:** Este problema no ocurre si se construye con el `Dockerfile.nodered` incluido en el proyecto, ya que limpia el caché durante el build.
 
 ### Configurar autenticación en Mosquitto
 

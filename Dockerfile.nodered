@@ -1,5 +1,11 @@
 FROM nodered/node-red:4.0.2
 
 USER root
-RUN npm install node-red-dashboard node-red-contrib-influxdb node-red-contrib-mqtt-broker
+RUN npm install \
+  node-red-dashboard \
+  node-red-contrib-influxdb \
+  node-red-contrib-mqtt-broker \
+  node-red-contrib-mongodb4 && \
+  npm cache clean --force && \
+  rm -rf /root/.npm
 USER node-red
