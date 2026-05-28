@@ -1,6 +1,6 @@
 # Simulación IoT — NodeRED + Mosquitto MQTT + MongoDB
 
-Proyecto para simular comunicaciones en Internet of Things (IoT) usando **NodeRED** como orquestador de flujos, **Eclipse Mosquitto** como broker MQTT y **MongoDB** como base de datos para persistencia de datos.
+Proyecto para simular comunicaciones en Internet of Things (IoT) usando **NodeRED** como orquestador de flujos, **Eclipse Mosquitto** como broker MQTT y **MongoDB** como base de datos.
 
 ## Arquitectura
 
@@ -12,16 +12,15 @@ Proyecto para simular comunicaciones en Internet of Things (IoT) usando **NodeRE
                              │
                      writes  │  reads
                              │
-               ┌─────────────┴──────────────┐
-               │         NodeRED            │
-               │       (1880 web)           │
-               └─────────────▲──────────────┘
-                            MQTT
-                          pub/sub
-               ┌─────────────┴──────────────┐
-               │        Mosquitto           │
-               │   (1883 MQTT / 9001 WS)    │
-               └────────────────────────────┘
+                ┌────────────┴─────────────┐
+                │         NodeRED          │
+                │    (1880 editor + API)   │
+                └─────────────▲────────────┘
+                              │  MQTT pub/sub
+                   ┌─────────┴───────────┐
+                   │     Mosquitto       │
+                   │(1883 MQTT/9001 WS)  │
+                   └─────────────────────┘
 ```
 
 Los contenedores comparten la red `iot-net` y se comunican internamente por el nombre del servicio (`mosquitto`, `nodered`, `mongodb`).
@@ -30,7 +29,7 @@ Los contenedores comparten la red `iot-net` y se comunican internamente por el n
 
 | Servicio  | Puerto | Protocolo         | Función                                               |
 |-----------|--------|-------------------|-------------------------------------------------------|
-| NodeRED   | `1880` | HTTP              | Editor visual de flujos y dashboard IoT               |
+| NodeRED   | `1880` | HTTP              | Editor, dashboard y endpoints httpIn (todo en un puerto)|
 | Mosquitto | `1883` | MQTT (TCP)        | Broker MQTT estándar para pub/sub de dispositivos     |
 | Mosquitto | `9001` | MQTT over WebSock | Permite conexión MQTT desde clientes web/navegador    |
 | MongoDB   | `27017`| MongoDB wire      | Base de datos NoSQL para persistencia de datos IoT    |
@@ -99,6 +98,7 @@ docker volume create mosquitto_data
 docker volume create mosquitto_log
 docker volume create nodered_data
 docker volume create mongodb_data
+
 
 # 3. Iniciar Mosquitto
 docker run -d \
@@ -195,6 +195,41 @@ docker exec -it iot-mongodb mongosh
 > show collections
 ```
 
+## Endpoints HTTP con httpIn y httpResponse
+
+NodeRED permite crear endpoints HTTP personalizados usando los nodos **httpIn** y **httpResponse**. En NodeRED v4 ambos usan el mismo puerto `1880` (editor y endpoints comparten el servidor).
+
+### Ejemplo: endpoint GET /hola
+
+1. Arrastrar un nodo **httpIn** al canvas.
+2. Configurarlo con:
+   - **Method**: `GET`
+   - **URL**: `/hola`
+   - **Name**: (opcional)
+3. Arrastrar un nodo **httpResponse** y conectarlo a la salida del **httpIn**.
+4. Opcionalmente, agregar un nodo **template** entre ambos para personalizar la respuesta:
+
+```json
+{ "payload": "Hola desde NodeRED!" }
+```
+
+5. Hacer clic en **Deploy**.
+
+Probar desde terminal:
+
+```bash
+curl http://localhost:1880/hola
+```
+
+### Endpoints existentes en NodeRED
+
+El proyecto ya incluye flows con endpoints HTTP que consultan MongoDB. Algunos ejemplos:
+
+| Endpoint | Descripción |
+|----------|-------------|
+| `GET /empresa_acme` | Todos los registros de `empresa_acme` |
+| `GET /deposito` | Registros de `super_acme` con ubicación "DEPÓSITO" |
+
 ## Personalización
 
 ### Agregar más nodos a NodeRED
@@ -231,10 +266,21 @@ npm error Your cache folder contains root-owned files
 Para solucionarlo, ejecutar en el contenedor:
 
 ```bash
-docker exec -it iot-nodered sh -c "rm -rf /tmp/.npm /root/.npm && npm cache clean --force"
+# 1. Limpiar caché root-owned (ejecutar como root)
+docker exec -u root iot-nodered sh -c "rm -rf /root/.npm && npm cache clean --force"
+
+# 2. Instalar el paquete como usuario node-red
+docker exec iot-nodered sh -c "npm install node-red-contrib-<nombre>"
+
+# 3. Reiniciar NodeRED para que cargue el nuevo nodo
+docker exec iot-nodered sh -c "kill -HUP 1"
+
+# Alternativa: todo en un solo comando como root
+docker exec -u root iot-nodered sh -c \
+  "rm -rf /root/.npm && npm cache clean --force && su node-red -c 'npm install node-red-contrib-<nombre>'"
 ```
 
-> **Nota:** Este problema no ocurre si se construye con el `Dockerfile.nodered` incluido en el proyecto, ya que limpia el caché durante el build.
+> **Nota:** Este problema no ocurre si se construye con el `Dockerfile.nodered` incluido en el proyecto, ya que limpia el caché durante el build (`rm -rf /root/.npm`).
 
 ### Configurar autenticación en Mosquitto
 
