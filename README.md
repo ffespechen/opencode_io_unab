@@ -1,29 +1,32 @@
 # Simulación IoT — NodeRED + Mosquitto MQTT + MongoDB
 
-Proyecto para simular comunicaciones en Internet of Things (IoT) usando **NodeRED** como orquestador de flujos, **Eclipse Mosquitto** como broker MQTT y **MongoDB** como base de datos.
+Proyecto para simular comunicaciones en Internet of Things (IoT) usando **NodeRED** como orquestador de flujos, **Eclipse Mosquitto** como broker MQTT, **MongoDB** como base de datos y una **aplicación web Node.js/Express** para CRUDL de lecturas IoT vía API REST e interfaz Bootstrap.
 
 ## Arquitectura
 
 ```
-                      ┌──────────────┐
-                      │   MongoDB    │
-                      │  (27017)     │
-                      └──────▲───────┘
-                             │
-                     writes  │  reads
-                             │
-                ┌────────────┴─────────────┐
-                │         NodeRED          │
-                │    (1880 editor + API)   │
-                └─────────────▲────────────┘
-                              │  MQTT pub/sub
-                   ┌─────────┴───────────┐
-                   │     Mosquitto       │
-                   │(1883 MQTT/9001 WS)  │
-                   └─────────────────────┘
+                      ┌──────────────────┐
+                      │  iot-webapp      │
+                      │ (3000 API + Web) │
+                      └────────┬─────────┘
+                               │ reads/writes
+                      ┌────────▼─────────┐
+                      │   MongoDB        │
+                      │  (27017)         │
+                      └────────▲─────────┘
+                               │ writes
+                  ┌────────────┴─────────────┐
+                  │         NodeRED          │
+                  │    (1880 editor + API)   │
+                  └─────────────▲────────────┘
+                                │  MQTT pub/sub
+                   ┌───────────┴───────────┐
+                   │      Mosquitto       │
+                   │(1883 MQTT/9001 WS)   │
+                   └──────────────────────┘
 ```
 
-Los contenedores comparten la red `iot-net` y se comunican internamente por el nombre del servicio (`mosquitto`, `nodered`, `mongodb`).
+Los contenedores comparten la red `iot-net` y se comunican internamente por el nombre del servicio (`mosquitto`, `nodered`, `mongodb`, `webapp`).
 
 ## Servicios y puertos expuestos
 
@@ -33,6 +36,7 @@ Los contenedores comparten la red `iot-net` y se comunican internamente por el n
 | Mosquitto | `1883` | MQTT (TCP)        | Broker MQTT estándar para pub/sub de dispositivos     |
 | Mosquitto | `9001` | MQTT over WebSock | Permite conexión MQTT desde clientes web/navegador    |
 | MongoDB   | `27017`| MongoDB wire      | Base de datos NoSQL para persistencia de datos IoT    |
+| WebApp    | `3000` | HTTP              | API REST + interfaz web CRUDL (Node.js/Express)      |
 
 ## Estructura del proyecto
 
@@ -40,6 +44,18 @@ Los contenedores comparten la red `iot-net` y se comunican internamente por el n
 .
 ├── docker-compose.yml         # Orquestación de servicios
 ├── Dockerfile.nodered         # Imagen personalizada de NodeRED
+├── API-REST.md                # Documentación de la API REST
+├── webapp/
+│   ├── Dockerfile             # Imagen de la aplicación web
+│   ├── package.json
+│   └── src/
+│       ├── index.js           # Entry point (Express)
+│       ├── config/db.js       # Conexión MongoDB
+│       ├── models/lectura.js  # Schema Mongoose
+│       ├── controllers/       # Lógica CRUDL
+│       ├── routes/            # Rutas API y web
+│       ├── middleware/        # Validación
+│       └── views/             # Templates EJS
 ├── mosquitto/
 │   └── config/
 │       └── mosquitto.conf     # Configuración del broker MQTT
@@ -83,6 +99,7 @@ docker compose restart nodered
 ```bash
 docker exec -it iot-nodered /bin/bash
 docker exec -it iot-mosquitto /bin/sh
+docker exec -it iot-webapp /bin/sh
 ```
 
 ## Uso sin Docker Compose (solo docker run)
@@ -131,9 +148,18 @@ docker run -d \
   --sysctl net.ipv6.conf.all.disable_ipv6=1 \
   --network iot-net \
   nodered/node-red:4.0.2
+
+# 6. Iniciar WebApp
+docker run -d \
+  --name iot-webapp \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -e MONGODB_URI=mongodb://iot-mongodb:27017/iot \
+  --network iot-net \
+  opencode_iot-webapp
 ```
 
-> **Nota:** NodeRED no incluirá `node-red-dashboard`, `node-red-contrib-mongodb4` ni otros paquetes extra. Pueden instalarse desde el panel "Manage palette" dentro del editor en `http://localhost:1880`. Si se obtiene el error `EACCES` al instalar, ejecutar este comando para limpiar el caché npm root-owned:
+> **Nota:** La webapp requiere build previo con `docker build -t opencode_iot-webapp ./webapp`. Si se usa NodeRED base, los paquetes extra deben instalarse desde Manage Palette. Si se obtiene error `EACCES`:
 >
 > ```bash
 > docker exec -it iot-nodered sh -c "rm -rf /tmp/.npm /root/.npm && npm cache clean --force"
@@ -142,8 +168,8 @@ docker run -d \
 ### Detener y eliminar contenedores
 
 ```bash
-docker stop iot-nodered iot-mongodb iot-mosquitto
-docker rm iot-nodered iot-mongodb iot-mosquitto
+docker stop iot-nodered iot-mongodb iot-mosquitto iot-webapp
+docker rm iot-nodered iot-mongodb iot-mosquitto iot-webapp
 ```
 
 ## Verificar funcionamiento
@@ -229,6 +255,29 @@ El proyecto ya incluye flows con endpoints HTTP que consultan MongoDB. Algunos e
 |----------|-------------|
 | `GET /empresa_acme` | Todos los registros de `empresa_acme` |
 | `GET /deposito` | Registros de `super_acme` con ubicación "DEPÓSITO" |
+
+## Aplicación Web CRUDL (iot-webapp)
+
+Servicio web Node.js/Express con API REST e interfaz Bootstrap que opera sobre la colección `esp32_lecturas` en MongoDB.
+
+### Acceso
+
+| Interfaz | URL                              |
+|----------|----------------------------------|
+| Web UI   | [http://localhost:3000](http://localhost:3000) |
+| API REST | `http://localhost:3000/api/lecturas`           |
+
+### Esquema del documento
+
+| Campo       | Tipo    | Requerido |
+|-------------|---------|-----------|
+| `valor`     | number  | Sí        |
+| `sensor`    | string  | Sí        |
+| `ubicacion` | string  | Sí        |
+| `fecha_hora`| datetime| Sí        |
+| `nodered`   | boolean | Sí        |
+
+> La API acepta campos adicionales. Ver `API-REST.md` para la documentación completa de endpoints y ejemplos curl.
 
 ## Personalización
 

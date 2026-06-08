@@ -1,0 +1,17 @@
+{
+  "name": "iot-webapp",
+  "version": "1.0.0",
+  "description": "Aplicación web Node.js/Express para CRUDL de lecturas IoT",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "ejs": "^3.1.10",
+    "express": "^4.21.0",
+    "express-validator": "^7.2.0",
+    "mongoose": "^8.8.0",
+    "morgan": "^1.10.0"
+  }
+}
