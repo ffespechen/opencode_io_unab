@@ -1,32 +1,33 @@
 # Simulación IoT — NodeRED + Mosquitto MQTT + MongoDB
 
-Proyecto para simular comunicaciones en Internet of Things (IoT) usando **NodeRED** como orquestador de flujos, **Eclipse Mosquitto** como broker MQTT, **MongoDB** como base de datos y una **aplicación web Node.js/Express** para CRUDL de lecturas IoT vía API REST e interfaz Bootstrap.
+Proyecto para simular comunicaciones en Internet of Things (IoT) usando **NodeRED** como orquestador de flujos, **Eclipse Mosquitto** como broker MQTT, **MongoDB** como base de datos y dos aplicaciones web para CRUDL de lecturas IoT: **iot-webapp** (Node.js/Express, puerto 3000) e **iot-fastapi** (Python/FastAPI, puerto 5000).
 
 ## Arquitectura
 
 ```
                       ┌──────────────────┐
-                      │  iot-webapp      │
-                      │ (3000 API + Web) │
-                      └────────┬─────────┘
-                               │ reads/writes
-                      ┌────────▼─────────┐
-                      │   MongoDB        │
-                      │  (27017)         │
-                      └────────▲─────────┘
-                               │ writes
-                  ┌────────────┴─────────────┐
-                  │         NodeRED          │
-                  │    (1880 editor + API)   │
-                  └─────────────▲────────────┘
-                                │  MQTT pub/sub
-                   ┌───────────┴───────────┐
-                   │      Mosquitto       │
-                   │(1883 MQTT/9001 WS)   │
-                   └──────────────────────┘
+                      │  iot-webapp      │   ┌──────────────────┐
+                      │ (3000 API + Web) │   │  iot-fastapi     │
+                      └────────┬─────────┘   │ (5000 API + Web) │
+                               │             └────────┬─────────┘
+                               │ reads/writes          │ reads/writes
+                      ┌────────▼───────────────────────▼─────────┐
+                      │                MongoDB                   │
+                      │               (27017)                    │
+                      └────────────────────▲─────────────────────┘
+                                           │ writes
+                              ┌────────────┴─────────────┐
+                              │         NodeRED          │
+                              │    (1880 editor + API)   │
+                              └─────────────▲────────────┘
+                                            │  MQTT pub/sub
+                               ┌───────────┴───────────┐
+                               │      Mosquitto       │
+                               │(1883 MQTT/9001 WS)   │
+                               └──────────────────────┘
 ```
 
-Los contenedores comparten la red `iot-net` y se comunican internamente por el nombre del servicio (`mosquitto`, `nodered`, `mongodb`, `webapp`).
+Los contenedores comparten la red `iot-net` y se comunican internamente por el nombre del servicio (`mosquitto`, `nodered`, `mongodb`, `webapp`, `fastapi`).
 
 ## Servicios y puertos expuestos
 
@@ -37,6 +38,7 @@ Los contenedores comparten la red `iot-net` y se comunican internamente por el n
 | Mosquitto | `9001` | MQTT over WebSock | Permite conexión MQTT desde clientes web/navegador    |
 | MongoDB   | `27017`| MongoDB wire      | Base de datos NoSQL para persistencia de datos IoT    |
 | WebApp    | `3000` | HTTP              | API REST + interfaz web CRUDL (Node.js/Express)      |
+| FastAPI   | `5000` | HTTP              | API REST + interfaz web CRUDL (Python/FastAPI)       |
 
 ## Estructura del proyecto
 
@@ -44,18 +46,29 @@ Los contenedores comparten la red `iot-net` y se comunican internamente por el n
 .
 ├── docker-compose.yml         # Orquestación de servicios
 ├── Dockerfile.nodered         # Imagen personalizada de NodeRED
-├── API-REST.md                # Documentación de la API REST
+├── API-REST.md                # Documentación API REST (Node.js)
+├── FASTAPI-REST.md            # Documentación API REST (FastAPI)
 ├── webapp/
-│   ├── Dockerfile             # Imagen de la aplicación web
+│   ├── Dockerfile             # Imagen Node.js/Express
 │   ├── package.json
-│   └── src/
-│       ├── index.js           # Entry point (Express)
-│       ├── config/db.js       # Conexión MongoDB
-│       ├── models/lectura.js  # Schema Mongoose
-│       ├── controllers/       # Lógica CRUDL
-│       ├── routes/            # Rutas API y web
-│       ├── middleware/        # Validación
-│       └── views/             # Templates EJS
+│   └── src/                   # Código fuente Node.js
+│       ├── index.js
+│       ├── config/db.js
+│       ├── models/lectura.js
+│       ├── controllers/
+│       ├── routes/
+│       ├── middleware/
+│       └── views/
+├── fastapi_app/
+│   ├── Dockerfile             # Imagen Python/FastAPI
+│   ├── requirements.txt
+│   └── app/                   # Código fuente Python
+│       ├── main.py
+│       ├── config/db.py
+│       ├── models/lectura.py
+│       ├── controllers/
+│       ├── routes/
+│       └── templates/
 ├── mosquitto/
 │   └── config/
 │       └── mosquitto.conf     # Configuración del broker MQTT
@@ -100,6 +113,7 @@ docker compose restart nodered
 docker exec -it iot-nodered /bin/bash
 docker exec -it iot-mosquitto /bin/sh
 docker exec -it iot-webapp /bin/sh
+docker exec -it iot-fastapi /bin/sh
 ```
 
 ## Uso sin Docker Compose (solo docker run)
@@ -157,8 +171,17 @@ docker run -d \
   -e MONGODB_URI=mongodb://iot-mongodb:27017/iot \
   --network iot-net \
   opencode_iot-webapp
-```
 
+# 7. Iniciar FastAPI
+docker build -t opencode_iot-fastapi ./fastapi_app
+docker run -d \
+  --name iot-fastapi \
+  --restart unless-stopped \
+  -p 5000:5000 \
+  -e MONGODB_URI=mongodb://iot-mongodb:27017/iot \
+  --network iot-net \
+  opencode_iot-fastapi
+```
 > **Nota:** La webapp requiere build previo con `docker build -t opencode_iot-webapp ./webapp`. Si se usa NodeRED base, los paquetes extra deben instalarse desde Manage Palette. Si se obtiene error `EACCES`:
 >
 > ```bash
@@ -168,8 +191,8 @@ docker run -d \
 ### Detener y eliminar contenedores
 
 ```bash
-docker stop iot-nodered iot-mongodb iot-mosquitto iot-webapp
-docker rm iot-nodered iot-mongodb iot-mosquitto iot-webapp
+docker stop iot-nodered iot-mongodb iot-mosquitto iot-webapp iot-fastapi
+docker rm iot-nodered iot-mongodb iot-mosquitto iot-webapp iot-fastapi
 ```
 
 ## Verificar funcionamiento
@@ -278,6 +301,26 @@ Servicio web Node.js/Express con API REST e interfaz Bootstrap que opera sobre l
 | `nodered`   | boolean | Sí        |
 
 > La API acepta campos adicionales. Ver `API-REST.md` para la documentación completa de endpoints y ejemplos curl.
+
+## Aplicación Web CRUDL (iot-fastapi)
+
+Servicio web Python/FastAPI con API REST e interfaz Bootstrap que opera sobre la misma colección `esp32_lecturas` en MongoDB.
+
+### Acceso
+
+| Interfaz | URL                              |
+|----------|----------------------------------|
+| Web UI   | [http://localhost:5000](http://localhost:5000) |
+| API REST | `http://localhost:5000/api/lecturas`           |
+| Swagger  | [http://localhost:5000/docs](http://localhost:5000/docs) |
+
+### Esquema del documento
+
+Idéntico al de `iot-webapp` (colección compartida `esp32_lecturas`). Ver sección anterior.
+
+### Documentación
+
+Ver `FASTAPI-REST.md` para la documentación completa de endpoints, ejemplos curl y rutas web.
 
 ## Personalización
 

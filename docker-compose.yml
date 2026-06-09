@@ -60,6 +60,21 @@ services:
     networks:
       - iot-net
 
+  fastapi:
+    build:
+      context: ./fastapi_app
+      dockerfile: Dockerfile
+    container_name: iot-fastapi
+    restart: unless-stopped
+    ports:
+      - "5000:5000"    # API REST e interfaz web CRUDL (FastAPI)
+    environment:
+      - MONGODB_URI=mongodb://iot-mongodb:27017/iot
+    depends_on:
+      - mongodb
+    networks:
+      - iot-net
+
 volumes:
   mosquitto_data:
   mosquitto_log:
