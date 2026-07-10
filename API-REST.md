@@ -56,7 +56,7 @@ Aplicación Node.js/Express para CRUDL de lecturas IoT almacenadas en MongoDB (c
 
 ## Endpoints API REST
 
-Base URL: `http://localhost:3000/api/lecturas`
+Base URL: `http://localhost:3001/api/lecturas`
 
 ### GET `/api/lecturas` — Listar todos
 
@@ -70,14 +70,14 @@ Devuelve un array JSON con todas las lecturas, ordenadas por `fecha_hora` descen
 
 **Ejemplo:**
 ```bash
-curl http://localhost:3000/api/lecturas?ubicacion=OFICINA%201
+curl http://localhost:3001/api/lecturas?ubicacion=OFICINA%201
 ```
 
 ### GET `/api/lecturas/:id` — Obtener uno
 
 **Ejemplo:**
 ```bash
-curl http://localhost:3000/api/lecturas/664a1b2c3d4e5f6a7b8c9d0e
+curl http://localhost:3001/api/lecturas/664a1b2c3d4e5f6a7b8c9d0e
 ```
 
 **Respuesta:** Objeto JSON de la lectura o `404 { error: "No encontrado" }`.
@@ -86,7 +86,7 @@ curl http://localhost:3000/api/lecturas/664a1b2c3d4e5f6a7b8c9d0e
 
 **Ejemplo:**
 ```bash
-curl -X POST http://localhost:3000/api/lecturas \
+curl -X POST http://localhost:3001/api/lecturas \
   -H "Content-Type: application/json" \
   -d '{
     "valor": 25.8,
@@ -105,7 +105,7 @@ Requiere el body completo con todos los campos obligatorios.
 
 **Ejemplo:**
 ```bash
-curl -X PUT http://localhost:3000/api/lecturas/664a1b2c3d4e5f6a7b8c9d0e \
+curl -X PUT http://localhost:3001/api/lecturas/664a1b2c3d4e5f6a7b8c9d0e \
   -H "Content-Type: application/json" \
   -d '{
     "valor": 30.1,
@@ -120,14 +120,14 @@ curl -X PUT http://localhost:3000/api/lecturas/664a1b2c3d4e5f6a7b8c9d0e \
 
 **Ejemplo:**
 ```bash
-curl -X DELETE http://localhost:3000/api/lecturas/664a1b2c3d4e5f6a7b8c9d0e
+curl -X DELETE http://localhost:3001/api/lecturas/664a1b2c3d4e5f6a7b8c9d0e
 ```
 
 **Respuesta:** `{ "mensaje": "Eliminado correctamente" }` o `404`.
 
 ## Rutas Web (Interfaz Bootstrap)
 
-Base URL: `http://localhost:3000`
+Base URL: `http://localhost:3001`
 
 | Método | Ruta          | Descripción                          |
 |--------|---------------|--------------------------------------|

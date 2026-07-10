@@ -51,10 +51,10 @@ services:
     container_name: iot-webapp
     restart: unless-stopped
     ports:
-      - "3000:3000"    # API REST e interfaz web CRUDL
+      - "3001:3001"    # API REST e interfaz web CRUDL
     environment:
       - MONGODB_URI=mongodb://iot-mongodb:27017/iot
-      - PORT=3000
+      - PORT=3001
     depends_on:
       - mongodb
     networks:
@@ -75,11 +75,61 @@ services:
     networks:
       - iot-net
 
+  influxdb:
+    image: influxdb:3-core
+    container_name: iot-influxdb
+    restart: unless-stopped
+    ports:
+      - "8181:8181"    # HTTP API InfluxDB 3 Core
+    volumes:
+      - influxdb_data:/var/lib/influxdb3
+    command: >
+      serve --node-id iot-node
+      --object-store file
+      --data-dir /var/lib/influxdb3
+      --http-bind 0.0.0.0:8181
+    networks:
+      - iot-net
+
+  influxdb-ui:
+    image: influxdata/influxdb3-ui:latest
+    container_name: iot-influxdb-ui
+    restart: unless-stopped
+    ports:
+      - "8080:8080"    # InfluxDB Explorer UI
+    volumes:
+      - influxdb_ui_db:/db
+    environment:
+      - UI_MODE=admin
+    depends_on:
+      - influxdb
+    networks:
+      - iot-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: iot-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"    # Interfaz web de Grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - influxdb
+    networks:
+      - iot-net
+
 volumes:
   mosquitto_data:
   mosquitto_log:
   nodered_data:
   mongodb_data:
+  influxdb_data:
+  influxdb_ui_db:
+  grafana_data:
 
 networks:
   iot-net:

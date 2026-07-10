@@ -1,33 +1,37 @@
 # Simulación IoT — NodeRED + Mosquitto MQTT + MongoDB
 
-Proyecto para simular comunicaciones en Internet of Things (IoT) usando **NodeRED** como orquestador de flujos, **Eclipse Mosquitto** como broker MQTT, **MongoDB** como base de datos y dos aplicaciones web para CRUDL de lecturas IoT: **iot-webapp** (Node.js/Express, puerto 3000) e **iot-fastapi** (Python/FastAPI, puerto 5000).
+Proyecto para simular comunicaciones en Internet of Things (IoT) usando **NodeRED** como orquestador de flujos, **Eclipse Mosquitto** como broker MQTT, **MongoDB** como base de datos, **InfluxDB 3 Core** como base de datos de series de tiempo, **Grafana** para visualización y dashboards, y dos aplicaciones web CRUDL: **iot-webapp** (Node.js/Express, puerto 3001) e **iot-fastapi** (Python/FastAPI, puerto 5000).
 
 ## Arquitectura
 
 ```
-                      ┌──────────────────┐
-                      │  iot-webapp      │   ┌──────────────────┐
-                      │ (3000 API + Web) │   │  iot-fastapi     │
-                      └────────┬─────────┘   │ (5000 API + Web) │
-                               │             └────────┬─────────┘
-                               │ reads/writes          │ reads/writes
-                      ┌────────▼───────────────────────▼─────────┐
-                      │                MongoDB                   │
-                      │               (27017)                    │
-                      └────────────────────▲─────────────────────┘
-                                           │ writes
-                              ┌────────────┴─────────────┐
-                              │         NodeRED          │
-                              │    (1880 editor + API)   │
-                              └─────────────▲────────────┘
-                                            │  MQTT pub/sub
-                               ┌───────────┴───────────┐
-                               │      Mosquitto       │
-                               │(1883 MQTT/9001 WS)   │
-                               └──────────────────────┘
+                                             ┌──────────────────┐
+                                             │     Grafana      │
+                                             │   (3000 web)     │
+                                             └────────┬─────────┘
+                                                      │ queries
+                       ┌──────────────────┐  ┌────────▼─────────┐
+                       │  iot-webapp      │  │  iot-influxdb    │
+                       │ (3001 API + Web)  │  │  (8181 API TSDB)│
+                       └────────┬─────────┘  └──────────────────┘
+                                │ reads/writes
+                       ┌────────▼───────────────────────┐
+                       │            MongoDB             │
+                       │           (27017)              │
+                       └────────────────▲───────────────┘
+                                         │ writes
+                            ┌────────────┴─────────────┐
+                            │         NodeRED          │
+                            │    (1880 editor + API)   │
+                            └─────────────▲────────────┘
+                                          │  MQTT pub/sub
+                             ┌───────────┴───────────┐
+                             │      Mosquitto       │
+                             │(1883 MQTT/9001 WS)   │
+                             └──────────────────────┘
 ```
 
-Los contenedores comparten la red `iot-net` y se comunican internamente por el nombre del servicio (`mosquitto`, `nodered`, `mongodb`, `webapp`, `fastapi`).
+Los contenedores comparten la red `iot-net` y se comunican internamente por el nombre del servicio (`mosquitto`, `nodered`, `mongodb`, `webapp`, `fastapi`, `influxdb`, `grafana`).
 
 ## Servicios y puertos expuestos
 
@@ -37,8 +41,11 @@ Los contenedores comparten la red `iot-net` y se comunican internamente por el n
 | Mosquitto | `1883` | MQTT (TCP)        | Broker MQTT estándar para pub/sub de dispositivos     |
 | Mosquitto | `9001` | MQTT over WebSock | Permite conexión MQTT desde clientes web/navegador    |
 | MongoDB   | `27017`| MongoDB wire      | Base de datos NoSQL para persistencia de datos IoT    |
-| WebApp    | `3000` | HTTP              | API REST + interfaz web CRUDL (Node.js/Express)      |
+| WebApp    | `3001` | HTTP              | API REST + interfaz web CRUDL (Node.js/Express)      |
 | FastAPI   | `5000` | HTTP              | API REST + interfaz web CRUDL (Python/FastAPI)       |
+| Grafana   | `3000` | HTTP              | Visualización y dashboards (InfluxDB + MongoDB)      |
+| InfluxDB  | `8181` | HTTP API          | Base de datos de series de tiempo (Time Series DB)   |
+| InfluxDB UI | `8080` | HTTP            | InfluxDB Explorer UI (oficial)                       |
 
 ## Estructura del proyecto
 
@@ -48,6 +55,8 @@ Los contenedores comparten la red `iot-net` y se comunican internamente por el n
 ├── Dockerfile.nodered         # Imagen personalizada de NodeRED
 ├── API-REST.md                # Documentación API REST (Node.js)
 ├── FASTAPI-REST.md            # Documentación API REST (FastAPI)
+├── GRAFANA.md                 # Documentación de Grafana
+├── INFLUXDB.md                # Documentación de InfluxDB 3 Core
 ├── webapp/
 │   ├── Dockerfile             # Imagen Node.js/Express
 │   ├── package.json
@@ -114,6 +123,8 @@ docker exec -it iot-nodered /bin/bash
 docker exec -it iot-mosquitto /bin/sh
 docker exec -it iot-webapp /bin/sh
 docker exec -it iot-fastapi /bin/sh
+docker exec -it iot-grafana /bin/sh
+docker exec -it iot-influxdb /bin/sh
 ```
 
 ## Uso sin Docker Compose (solo docker run)
@@ -129,6 +140,8 @@ docker volume create mosquitto_data
 docker volume create mosquitto_log
 docker volume create nodered_data
 docker volume create mongodb_data
+docker volume create influxdb_data
+docker volume create grafana_data
 
 
 # 3. Iniciar Mosquitto
@@ -167,8 +180,9 @@ docker run -d \
 docker run -d \
   --name iot-webapp \
   --restart unless-stopped \
-  -p 3000:3000 \
+  -p 3001:3001 \
   -e MONGODB_URI=mongodb://iot-mongodb:27017/iot \
+  -e PORT=3001 \
   --network iot-net \
   opencode_iot-webapp
 
@@ -181,6 +195,40 @@ docker run -d \
   -e MONGODB_URI=mongodb://iot-mongodb:27017/iot \
   --network iot-net \
   opencode_iot-fastapi
+
+# 8. Iniciar InfluxDB 3 Core
+docker run -d \
+  --name iot-influxdb \
+  --restart unless-stopped \
+  -p 8181:8181 \
+  -v influxdb_data:/var/lib/influxdb3 \
+  --network iot-net \
+  influxdb:3-core \
+  serve --node-id iot-node \
+  --object-store file \
+  --data-dir /var/lib/influxdb3 \
+  --http-bind 0.0.0.0:8181
+
+# 9. Iniciar InfluxDB Explorer UI
+docker run -d \
+  --name iot-influxdb-ui \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -v influxdb_ui_db:/db \
+  -e UI_MODE=admin \
+  --network iot-net \
+  influxdata/influxdb3-ui:latest
+
+# 10. Iniciar Grafana
+docker run -d \
+  --name iot-grafana \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -v grafana_data:/var/lib/grafana \
+  -e GF_SECURITY_ADMIN_USER=admin \
+  -e GF_SECURITY_ADMIN_PASSWORD=admin \
+  --network iot-net \
+  grafana/grafana:latest
 ```
 > **Nota:** La webapp requiere build previo con `docker build -t opencode_iot-webapp ./webapp`. Si se usa NodeRED base, los paquetes extra deben instalarse desde Manage Palette. Si se obtiene error `EACCES`:
 >
@@ -191,8 +239,8 @@ docker run -d \
 ### Detener y eliminar contenedores
 
 ```bash
-docker stop iot-nodered iot-mongodb iot-mosquitto iot-webapp iot-fastapi
-docker rm iot-nodered iot-mongodb iot-mosquitto iot-webapp iot-fastapi
+docker stop iot-nodered iot-mongodb iot-mosquitto iot-webapp iot-fastapi iot-grafana iot-influxdb iot-influxdb-ui
+docker rm iot-nodered iot-mongodb iot-mosquitto iot-webapp iot-fastapi iot-grafana iot-influxdb iot-influxdb-ui
 ```
 
 ## Verificar funcionamiento
@@ -287,8 +335,8 @@ Servicio web Node.js/Express con API REST e interfaz Bootstrap que opera sobre l
 
 | Interfaz | URL                              |
 |----------|----------------------------------|
-| Web UI   | [http://localhost:3000](http://localhost:3000) |
-| API REST | `http://localhost:3000/api/lecturas`           |
+| Web UI   | [http://localhost:3001](http://localhost:3001) |
+| API REST | `http://localhost:3001/api/lecturas`           |
 
 ### Esquema del documento
 
@@ -321,6 +369,44 @@ Idéntico al de `iot-webapp` (colección compartida `esp32_lecturas`). Ver secci
 ### Documentación
 
 Ver `FASTAPI-REST.md` para la documentación completa de endpoints, ejemplos curl y rutas web.
+
+## InfluxDB 3 Core — Series de Tiempo
+
+**InfluxDB 3 Core** es la base de datos de series de tiempo del proyecto, accesible en `http://localhost:8181`.
+
+### Configuración inicial (post-startup)
+
+```bash
+# 1. Crear token de administración
+docker exec -it iot-influxdb influxdb3 create token --node-id iot-node --admin
+
+# La salida incluirá un token. Guardarlo.
+
+# 2. Crear base de datos
+docker exec -it iot-influxdb influxdb3 create database \
+  --node-id iot-node \
+  --database iot_lecturas \
+  --token <TOKEN>
+
+# 3. Verificar
+curl http://localhost:8181/health
+```
+
+> Ver `INFLUXDB.md` para detalles completos de configuración y ejemplos.
+
+## Grafana — Dashboards
+
+**Grafana** está disponible en [http://localhost:3000](http://localhost:3000) con usuario `admin` / `admin`.
+
+### Agregar InfluxDB como datasource
+
+1. Ir a **Connections → Data Sources → Add data source → InfluxDB**.
+2. Configurar:
+   - **URL**: `http://iot-influxdb:8181`
+   - **Database**: `iot_lecturas`
+3. Hacer clic en **Save & Test**.
+
+> Ver `GRAFANA.md` para instrucciones detalladas, ejemplos de queries y dashboards.
 
 ## Personalización
 
